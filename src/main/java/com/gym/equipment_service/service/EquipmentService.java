@@ -5,8 +5,10 @@ import com.gym.equipment_service.domain.Equipment;
 import com.gym.equipment_service.repository.EquipmentRepository;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,13 +19,25 @@ public class EquipmentService {
     private RabbitTemplate rabbitTemplate;
 
     @Autowired
+    private KafkaTemplate kafkaTemplate;
+
+    @Autowired
     private EquipmentRepository equipmentRepository;
+
+    private static final String EQUIPMENT_TOPIC = "equipment-events";
+
 
     public Equipment addEquipment(Equipment equipment) {
 
-        String msg = "New equipment added: " + equipment.getName() + " with quantity: " + equipment.getQuantity();
-        rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICACIONES_QUEUE, msg);
-        return equipmentRepository.save(equipment);
+        Equipment savedEquipment = equipmentRepository.save(equipment);
+
+        String rabbitMsg = "New equipment added: " + savedEquipment.getName() + " with quantity: " + savedEquipment.getQuantity();
+        rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICACIONES_QUEUE, rabbitMsg);
+
+        String kafkaMsg = "Equipment added - ID: " + savedEquipment.getId() + ", Name: " + savedEquipment.getName() + ", Quantity: " + savedEquipment.getQuantity();
+        kafkaTemplate.send(EQUIPMENT_TOPIC, kafkaMsg);
+
+        return savedEquipment;
     }
 
     public List<Equipment> getAllEquipment() {
@@ -41,6 +55,10 @@ public class EquipmentService {
             equipment.setName(updatedEquipment.getName());
             equipment.setQuantity(updatedEquipment.getQuantity());
             equipment.setCondition(updatedEquipment.getCondition());
+
+            String kafkaMsg = "Equipment updated - ID: " + updatedEquipment.getId() + ", Name: " + updatedEquipment.getName() + ", Condition: " + updatedEquipment.getCondition();
+            kafkaTemplate.send(EQUIPMENT_TOPIC, kafkaMsg);
+
             return equipmentRepository.save(equipment);
 
         }
@@ -55,6 +73,13 @@ public class EquipmentService {
     }
 
     public void deleteEquipment(Long id) {
-        equipmentRepository.deleteById(id);
+        if(equipmentRepository.existsById(id)){
+            equipmentRepository.deleteById(id);
+
+            String kafkaMsg = "Equipment deleted - ID " + id;
+            kafkaTemplate.send(EQUIPMENT_TOPIC, kafkaMsg);
+        }else {
+            throw new RuntimeException("Equipment not found with id: " + id);
+        }
     }
 }
